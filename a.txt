@@ -1,0 +1,140 @@
+1. System Overview
+This backend system enables users to refer others and receive profit sharing based on a two-level referral hierarchy. The system distributes earnings in real-time when a purchase is made and supports up to 8 direct referrals per user. All user actions, referrals, purchases, and earnings are securely stored in a MongoDB database.
+
+2. System Architecture
+Tech Stack:
+
+Node.js with Express.js for backend logic and REST APIs
+
+MongoDB (cloud or local) for persistent data storage
+
+Mongoose for object modeling
+
+Socket.IO for real-time notifications (WebSocket)
+
+(Frontend optional: React used only for demonstration/testing)
+
+Key Components:
+
+Users Collection: Stores user profiles, referral relationships, and status.
+
+Earnings Collection: Records every earning event with amount, source, and recipient.
+
+Controllers: Business logic for registration, purchases, and earnings distribution.
+
+Routes: REST API endpoints for user registration, purchase, and data retrieval.
+
+WebSockets: Provides live earnings updates to users (when frontend is present).
+
+3. Setup Instructions
+A. Clone and Install
+git clone <your-repo-url>
+cd backend_referral
+npm install
+
+B. Environment Variables
+Create a .env file in the project root:
+PORT=5050
+MONGO_URI=your-mongodb-connection-string
+
+Use MongoDB Atlas for cloud DB, or local MongoDB if running locally.
+
+C. Run the Server
+npm run dev
+
+Server runs on the port specified in .env (default: 5050).
+
+4. API Usage
+A. Register User
+Endpoint: POST /api/users
+
+Body Example:
+{
+  "name": "Alice",
+  "email": "alice@example.com",
+  "referredBy": "optional_parent_user_id"
+}
+Returns: New user object with MongoDB _id.
+
+B. List All Users
+Endpoint: GET /api/users
+
+Returns: Array of all user objects (useful for getting user IDs for referrals).
+
+C. Make a Purchase
+Endpoint: POST /api/purchase
+
+Body Example:
+{
+  "buyerId": "user_id_from_registration",
+  "purchaseAmount": 2000
+}
+Returns: Success message and profit sharing is automatically handled.
+
+
+5. Profit Distribution Logic
+Level 1 Referrer: Receives 5% of profit from their direct referrals’ qualifying purchases.
+
+Level 2 Referrer: Receives 1% of profit from purchases by their Level 2 referrals.
+
+Minimum Purchase: Only purchases over 1000 Rs are counted for earnings.
+
+Referral Limit: Each user may directly refer up to 8 users (enforced in logic).
+
+6. Live Data & Notifications
+Socket.IO integration enables the server to emit real-time earnings updates to connected users when a downline user completes a purchase.
+
+7. System Flow Example
+User A registers.
+
+User B registers with A’s user ID as referredBy.
+
+User C registers with B’s user ID as referredBy.
+
+User C makes a purchase over 1000 Rs:
+
+User B (direct referrer) receives 5%.
+
+User A (indirect/level 2) receives 1%.
+
+8. Database Design (Schemas)
+User Schema
+name (String)
+
+email (String, unique)
+
+referredBy (User ID, optional)
+
+referrals (Array of User IDs)
+
+isActive (Boolean)
+
+timestamps (createdAt, updatedAt)
+
+Earning Schema
+user (User ID of recipient)
+
+amount (Number)
+
+source (User ID of purchaser)
+
+level (1 or 2)
+
+createdAt (timestamp)
+
+9. Security & Edge Cases
+Handles invalid users, referrals over limit, inactive users, duplicate emails.
+
+Data validation and error responses for missing/incorrect API data.
+
+Only users with purchases >1000 trigger earnings.
+
+10. Testing
+Use Postman to test all API endpoints:
+
+Register users, make purchases, list all users, (optionally) get earnings.
+
+MongoDB Compass or Atlas UI can be used to inspect DB records.
+
+11. Conclusion
+This backend implements a scalable, real-time multi-level referral system with strict validation, efficient profit distribution, and persistent reporting — ready for integration with any frontend or third-party system.
