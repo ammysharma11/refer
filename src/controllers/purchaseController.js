@@ -1,70 +1,78 @@
-const User = require("../models/User");
-const Earning = require("../models/Earning");
+const mongoose = require("mongoose");
+const User     = require("../models/User");
+const Earning  = require("../models/Earning");
 
-exports.handlePurchase = async (req, res) => {
+exports.createPurchase = async (req, res) => {
+  const io = req.app.get("io");
+  const { userId, amount } = req.body;
+
+  console.log("💰 createPurchase:", { userId, amount });
+
+  if (!userId || typeof amount !== "number") {
+    return res.status(400).json({ message: "userId & numeric amount required" });
+  }
+  if (amount <= 1000) {
+    return res.status(200).json({ message: "Below threshold—no earnings" });
+  }
+
+  const session = await mongoose.startSession();
   try {
-    const { buyerId, purchaseAmount } = req.body;
+    await session.withTransaction(async () => {
+      const profit = amount * 0.20;   // 20 % margin
 
-    // 1. Validate threshold
-    if (purchaseAmount < 1000) {
-      return res.status(400).json({ message: "Purchase must be at least ₹1000" });
-    }
+      const purchaser = await User.findById(userId).lean();
+      if (!purchaser) throw new Error(`Purchaser not found: ${userId}`);
 
-    // 2. Find buyer
-    const buyer = await User.findById(buyerId);
-    if (!buyer || !buyer.isActive) {
-      return res.status(404).json({ message: "Invalid or inactive buyer." });
-    }
+      // -------- Level 1 ----------
+      if (purchaser.referredBy) {
+        const parentId = purchaser.referredBy.toString();
+        const share1   = profit * 0.05;          // 5 %
 
-    const io = req.io; // from middleware
+        await Earning.create([{
+          userId:         parentId,
+          fromUserId:     userId,
+          level:          1,
+          purchaseAmount: amount,
+          earningAmount:  share1
+        }], { session });
 
-    // 3. Distribute 5% to Level 1 (direct referrer)
-    if (buyer.referredBy) {
-      const level1 = await User.findById(buyer.referredBy);
-      const earning1 = +(purchaseAmount * 0.05).toFixed(2);
-
-      await Earning.create({
-        userId: level1._id,
-        fromUserId: buyer._id,
-        level: 1,
-        purchaseAmount,
-        earningAmount: earning1
-      });
-
-      // 🔔 Notify Level 1
-      io.to(level1._id.toString()).emit("earningsUpdate", {
-        userId: level1._id,
-        amount: earning1,
-        from: buyer.name,
-        level: 1
-      });
-
-      // 4. Distribute 1% to Level 2 (referrer of referrer)
-      if (level1.referredBy) {
-        const level2 = await User.findById(level1.referredBy);
-        const earning2 = +(purchaseAmount * 0.01).toFixed(2);
-
-        await Earning.create({
-          userId: level2._id,
-          fromUserId: buyer._id,
-          level: 2,
-          purchaseAmount,
-          earningAmount: earning2
-        });
-
-        // 🔔 Notify Level 2
-        io.to(level2._id.toString()).emit("earningsUpdate", {
-          userId: level2._id,
-          amount: earning2,
-          from: buyer.name,
-          level: 2
+        io.to(parentId).emit("earningsUpdate", {
+          level: 1,
+          amount: share1,          // <- send the earning amount
+          from:   userId
         });
       }
-    }
 
-    res.status(200).json({ message: "Purchase processed. Earnings distributed." });
+      // -------- Level 2 ----------
+      if (purchaser.referredBy) {
+        const parent = await User.findById(purchaser.referredBy).lean();
+        if (parent && parent.referredBy) {
+          const grandId = parent.referredBy.toString();
+          const share2  = profit * 0.01;        // 1 %
+
+          await Earning.create([{
+            userId:         grandId,
+            fromUserId:     userId,
+            level:          2,
+            purchaseAmount: amount,
+            earningAmount:  share2
+          }], { session });
+
+          io.to(grandId).emit("earningsUpdate", {
+            level: 2,
+            amount: share2,
+            from:   userId
+          });
+        }
+      }
+    });
+
+    session.endSession();
+    return res.status(201).json({ message: "Purchase processed" });
   } catch (err) {
-    console.error("Purchase error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("‼️ createPurchase error:", err);
+    try { await session.abortTransaction(); } catch (_) {}
+    session.endSession();
+    return res.status(500).json({ message: err.message });
   }
 };

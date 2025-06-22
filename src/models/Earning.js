@@ -1,33 +1,32 @@
 const mongoose = require("mongoose");
+const { Schema } = mongoose;
 
-const earningSchema = new mongoose.Schema({
+/*
+ * One document per payout to a user
+ */
+const earningSchema = new Schema({
   userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
+    type: Schema.Types.ObjectId,
+    ref : "User",
+    required: true            // receiver
   },
   fromUserId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
+    type: Schema.Types.ObjectId,
+    ref : "User",
+    required: true            // purchaser
   },
   level: {
-    type: Number,
-    enum: [1, 2], // Only Level 1 or Level 2 earnings are valid
+    type: Number,             // 1 or 2
     required: true
   },
   purchaseAmount: {
-    type: Number,
+    type: Number,             // full spend
     required: true
   },
   earningAmount: {
-    type: Number,
+    type: Number,             // slice paid to userId
     required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
   }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model("Earning", earningSchema);

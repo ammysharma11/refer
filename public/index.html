@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Referral System – Demo & Dashboard</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  body { font-family:sans-serif; margin:1.4rem; }
+  fieldset { margin-bottom:1.2rem; padding:.7rem .9rem; }
+  label,input,select,button { display:block; margin:.5rem 0; }
+  input,select { padding:.35rem; width:270px; }
+  ul { padding-left:1.3rem; }
+  table { border-collapse:collapse; margin-top:.4rem; }
+  th,td { border:1px solid #888; padding:.35rem .6rem; }
+  h3 { margin:.6rem 0 .3rem; }
+</style>
+</head>
+<body>
+<h2>Referral System – Demo &amp; Dashboard</h2>
+
+<!-- CREATE USER -->
+<fieldset>
+  <legend>Create User</legend>
+  <label>Name  <input id="newName"></label>
+  <label>Email <input id="newEmail"></label>
+  <label>Referred by
+    <select id="referrerSelect"><option value="">— none —</option></select>
+  </label>
+  <button id="createBtn">Create User</button>
+  <div id="createStatus"></div>
+</fieldset>
+
+<!-- LIVE-EARNINGS DEMO -->
+<fieldset>
+  <legend>Live Earnings Demo</legend>
+
+  <label>Listen as (earner)
+    <select id="listenerSelect"><option>Loading…</option></select>
+  </label>
+  <button id="startBtn">Start Listening</button>
+
+  <div>User&nbsp;ID: <span id="uid">—</span></div>
+  <ul id="feed"><li>none yet</li></ul>
+
+  <hr>
+
+  <label>Purchaser (buyer)
+    <select id="purchaserSelect"><option>Loading…</option></select>
+  </label>
+  <label>Amount ₹<input id="amt" type="number" value="1500"></label>
+  <button id="buyBtn" disabled>Simulate Purchase</button>
+</fieldset>
+
+<!-- ANALYTICS -->
+<fieldset>
+  <legend>Analytics Dashboard</legend>
+  <label>Choose user for report
+    <select id="reportUser"><option>Loading…</option></select>
+  </label>
+  <button id="loadReport">Load Report</button>
+
+  <h3>Totals by Level</h3>
+  <ul id="levelList"><li>(no data)</li></ul>
+
+  <h3>Totals by Referrer</h3>
+  <table id="refTable">
+    <thead><tr><th>User</th><th>Total ₹</th></tr></thead>
+    <tbody><tr><td colspan="2">(no data)</td></tr></tbody>
+  </table>
+</fieldset>
+
+<script>
+const $ = id => document.getElementById(id);
+const nameById = {};
+let socket = null;
+
+/* load users */
+function loadUsers() {
+  fetch("/api/users")
+    .then(r => r.json())
+    .then(users => {
+      users.forEach(u => nameById[u._id] = u.name);
+      const referrers = users.filter(u => u.referrals.length);
+      const referees  = users.filter(u => u.referredBy);
+
+      $("referrerSelect").innerHTML = "<option value=''>— none —</option>";
+      ["listenerSelect","purchaserSelect","reportUser"]
+        .forEach(id => $(id).innerHTML = "<option value=''>-- select user --</option>");
+
+      users.forEach(u => $("referrerSelect").add(new Option(u.name, u._id)));
+
+      referrers.forEach(u => {
+        const p = u.referredBy ? (nameById[u.referredBy] || u.referredBy) : "—";
+        $("listenerSelect").add(new Option(`${u.name} (${u._id}) — ref by ${p}`, u._id));
+      });
+
+      referees.forEach(u => {
+        const p = nameById[u.referredBy] || u.referredBy;
+        $("purchaserSelect").add(new Option(`${u.name} (${u._id}) — referred by ${p}`, u._id));
+      });
+
+      users.forEach(u => $("reportUser").add(new Option(`${u.name} (${u._id})`, u._id)));
+    })
+    .catch(err => document.querySelectorAll("select")
+      .forEach(s => s.innerHTML="<option>Error</option>"));
+}
+loadUsers();
+
+/* create user */
+$("createBtn").onclick = () => {
+  const name = $("newName").value.trim();
+  const email= $("newEmail").value.trim();
+  const ref  = $("referrerSelect").value || undefined;
+  if(!name||!email) return alert("name & email required");
+  $("createStatus").textContent="Creating…";
+  fetch("/api/users",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ name,email,referredBy:ref })})
+  .then(r=>r.json()).then(()=>{ $("createStatus").textContent="User created"; loadUsers(); })
+  .catch(()=>$("createStatus").textContent="Error");
+};
+
+/* live earnings */
+$("startBtn").onclick = ()=>{
+  const earner=$("listenerSelect").value;
+  if(!earner) return alert("pick earner");
+  $("uid").textContent=earner; $("feed").innerHTML=""; $("buyBtn").disabled=false;
+  socket?.disconnect(); socket=io(); socket.emit("join",{userId:earner});
+  socket.on("earningsUpdate",p=>{
+    const buyer=nameById[p.from]||p.from;
+    const li=document.createElement("li");
+    li.textContent=`+₹${p.amount.toFixed(2)} (L${p.level}) from ${buyer} (${p.from})`;
+    $("feed").prepend(li);
+  });
+};
+
+$("buyBtn").onclick=()=>{
+  const buyer=$("purchaserSelect").value;
+  const amt=Number($("amt").value);
+  if(!buyer) return alert("pick buyer");
+  fetch("/api/purchases",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({userId:buyer,amount:amt})});
+};
+
+/* analytics */
+$("loadReport").onclick=()=>{
+  const uid=$("reportUser").value;
+  if(!uid) return alert("select user");
+
+  fetch(`/api/earnings/report/${uid}`)
+    .then(r=>{if(!r.ok)throw new Error("status "+r.status);return r.json();})
+    .then(data=>{
+      $("levelList").innerHTML=data.byLevel.length?
+        data.byLevel.map(x=>`<li>Level ${x.level}: ₹${x.total.toFixed(2)}`).join(""):
+        "<li>No earnings</li>";
+
+      $("refTable").tBodies[0].innerHTML=data.byReferrer.length?
+        data.byReferrer.map(r=>`<tr><td>${r.user} (${r.id})</td><td>₹${r.total.toFixed(2)}</td></tr>`).join(""):
+        "<tr><td colspan='2'>No data</td></tr>";
+    })
+    .catch(err=>{
+      $("levelList").innerHTML="<li>Error ("+err.message+")</li>";
+      $("refTable").tBodies[0].innerHTML="<tr><td colspan='2'>Error</td></tr>";
+    });
+};
+</script>
+</body>
+</html>
